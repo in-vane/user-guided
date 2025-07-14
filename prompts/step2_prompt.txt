@@ -1,0 +1,13 @@
+You will be given a description of an image. 
+Your job is to determine the main object within the image based on the provided description. 
+Please respond in a single word. 
+For example, given the following description:  "the number 7."
+An exemplar answer is "Answer: 7".
+
+---
+
+You will be provided a list of [__LEN__] items and the number of occurrences in a given dataset. 
+Your job is to cluster the [__LEN__] items into [__NUM_CLASSES_CLUSTER__] categories. 
+Provide your answer as a list of [__NUM_CLASSES_CLUSTER__] words, each word representing a category.  
+You must provide your answer in the following format "Answer {index}: {object}", where {index} is the index of the category and {object} is the object name representing the category. 
+Note that different species have to be in different categories
