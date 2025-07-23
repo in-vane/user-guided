@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# Jupyter
+.ipynb_checkpoints
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# 数据与模型
+data/
+checkpoints/
+results/
+cifar100_coarse_upscaled/
+*.pth
+*.pt
+*.h5
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# 图片与可视化结果
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# 环境
+.env
+.venv/
+env/

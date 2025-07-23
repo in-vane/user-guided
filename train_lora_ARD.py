@@ -19,8 +19,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ---------- 命令行参数 ----------
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'stl10', 'ppmi', 'mnist', 'oxford_pet'], help='选择数据集')
-parser.add_argument('--epochs', type=int, default=20, help='训练轮数')
+parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100', 'stl10', 'ppmi', 'mnist'], help='选择数据集')
+parser.add_argument('--epochs', type=int, default=50, help='训练轮数')
 args = parser.parse_args()
 
 # ---------- 加载 OpenCLIP 模型 ----------
@@ -60,6 +60,37 @@ if args.dataset == 'cifar10':
     dataset = datasets.CIFAR10(root="./data", train=True, download=True, transform=transform)
     testset = datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
     num_classes = 10
+elif args.dataset == 'cifar100':
+    # ---------- CIFAR-100 粗粒度映射 ----------
+    CIFAR100_COARSE_MAPPING = [
+        4, 1, 14, 8, 0, 6, 7, 7, 18, 3,
+        3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
+        6, 11, 5, 10, 7, 6, 13, 15, 3, 15,
+        0, 11, 1, 10, 12, 14, 16, 9, 11, 5,
+        5, 19, 8, 8, 15, 13, 14, 17, 18, 10,
+        16, 4, 17, 4, 2, 0, 17, 4, 18, 17,
+        10, 3, 2, 12, 12, 16, 12, 1, 9, 19,
+        2, 10, 0, 1, 16, 12, 9, 13, 15, 13,
+        16, 19, 2, 4, 6, 19, 5, 5, 8, 19,
+        18, 1, 2, 15, 6, 0, 17, 8, 14, 13
+    ]
+    dataset = datasets.CIFAR100(root="./data", train=True, download=True, transform=transform)
+    testset = datasets.CIFAR100(root="./data", train=False, download=True, transform=transform)
+
+    def convert_to_coarse(labels):
+        return [CIFAR100_COARSE_MAPPING[label] for label in labels]
+    dataset.targets = convert_to_coarse(dataset.targets)
+    testset.targets = convert_to_coarse(testset.targets)
+    coarse_class_names = [
+        'aquatic mammals', 'fish', 'flowers', 'food containers', 'fruit and vegetables',
+        'household electrical devices', 'household furniture', 'insects', 'large carnivores',
+        'large man-made outdoor things', 'large natural outdoor scenes', 'large omnivores and herbivores',
+        'medium-sized mammals', 'non-insect invertebrates', 'people', 'reptiles', 
+        'small mammals', 'trees', 'vehicles 1', 'vehicles 2'
+    ]
+    dataset.classes = coarse_class_names
+    testset.classes = coarse_class_names
+    num_classes = 20
 elif args.dataset == 'stl10':
     dataset = datasets.STL10(root="./data", split='train', download=True, transform=transform)
     testset = datasets.STL10(root="./data", split='test', download=True, transform=transform)

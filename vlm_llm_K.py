@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 # ---------- 命令行参数 ----------
 parser = argparse.ArgumentParser(description='VQA-LLM图像分类系统')
-parser.add_argument('--dataset', type=str, required=True, choices=['mnist', 'cifar10', 'stl10', 'ppmi', 'oxford_pet'])
+parser.add_argument('--dataset', type=str, required=True, choices=['mnist', 'cifar10', 'cifar100', 'stl10', 'ppmi', 'oxford_pet'])
 parser.add_argument('--k', type=int, default=10)
 parser.add_argument('--sample_size', type=int, default=200)
 parser.add_argument('--batch_size', type=int, default=32)
 parser.add_argument('--output_dir', type=str, default='results')
-parser.add_argument('--criteria', type=str, default='default', choices=['flying', 'living', 'situation', 'instrument', 'color', 'default'])
+parser.add_argument('--criteria', type=str, default='default', choices=['flying', 'living', 'situation', 'instrument', 'cifar20', 'default'])
 args = parser.parse_args()
 
 # ---------- 数据集类 ----------
@@ -46,6 +46,28 @@ class CustomDataset:
             self.dataset = datasets.CIFAR10(root="./data", train=(self.split == 'train'), download=True)
             self.classes = ['airplane', 'automobile', 'bird', 'cat', 'deer',
                             'dog', 'frog', 'horse', 'ship', 'truck']
+        elif self.dataset_name == 'cifar100':
+            self.dataset = datasets.CIFAR100(root="./data", train=(self.split == 'train'), download=True)
+            CIFAR100_COARSE_MAPPING = [
+                4, 1, 14, 8, 0, 6, 7, 7, 18, 3,
+                3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
+                6, 11, 5, 10, 7, 6, 13, 15, 3, 15,
+                0, 11, 1, 10, 12, 14, 16, 9, 11, 5,
+                5, 19, 8, 8, 15, 13, 14, 17, 18, 10,
+                16, 4, 17, 4, 2, 0, 17, 4, 18, 17,
+                10, 3, 2, 12, 12, 16, 12, 1, 9, 19,
+                2, 10, 0, 1, 16, 12, 9, 13, 15, 13,
+                16, 19, 2, 4, 6, 19, 5, 5, 8, 19,
+                18, 1, 2, 15, 6, 0, 17, 8, 14, 13
+            ]
+            # 将细粒度标签转换为粗粒度标签
+            original_targets = self.dataset.targets
+            self.dataset.targets = [CIFAR100_COARSE_MAPPING[t] for t in original_targets]
+            self.classes = ['aquatic mammals', 'fish', 'flowers', 'food containers', 'fruit and vegetables',
+                            'household electrical devices', 'household furniture', 'insects', 'large carnivores',
+                            'large man-made outdoor things', 'large natural outdoor scenes', 'large omnivores and herbivores',
+                            'medium-sized mammals', 'non-insect invertebrates', 'people', 'reptiles', 
+                            'small mammals', 'trees', 'vehicles 1', 'vehicles 2']
         elif self.dataset_name == 'stl10':
             self.dataset = datasets.STL10(root="./data", split=self.split, download=True)
             self.classes = ['airplane', 'bird', 'car', 'cat', 'deer',
@@ -97,8 +119,8 @@ def create_prompt(desc, criteria, candidates):
         return f"You will be given a list of object descriptions. Determine for each object whether it is 'existing in nature or 'man-made'. For 'existing in nature', answer 'organism' and for 'man-made', answer 'manufactured'.\nDescription: {desc}\nOptions: [organism, manufactured]\nAnswer:"
     elif criteria == 'instrument':
         return f"You will be given a list of objects. Decide which of the following each object is more related to: 'string', 'brass'.\nDescription: {desc}\nOptions: [string, brass]\nAnswer:"
-    elif criteria == 'color':
-        return f"You will be given a list of objects' color. Decide which of the following each object is more related to: 'black', 'white', 'gray', 'brown'.\nDescription: {desc}\nOptions: ['black', 'white', 'gray', 'brown']\nAnswer:"
+    elif criteria == 'cifar20':
+        return f"You will be given a list of object descriptions. Decide which of the following each object is more related to: 'organism', 'plant', 'man-made', 'landscape'.\nDescription: {desc}\nOptions: ['organism', 'plant', 'man-made', 'landscape']\nAnswer:"
     else:
         return f"Classify the object:\nDescription: {desc}\nOptions: {', '.join(candidates)}\nAnswer:"
 
@@ -141,8 +163,8 @@ def compute_constrained_confidence(prompt, word, candidate_set, tokenizer, model
         # 直接返回归一化概率（不再 sigmoid 缩放，可根据需要调节）
         confidence = round(min(max(norm_prob, 0.0), 1.0), 4)
 
-        logger.info(f"[Confidence] Word: {word}, Prob: {prob:.4f}, Sum: {total:.4f}, Norm: {confidence:.4f}")
-        logger.info(f"[Candidates Prob] " + ", ".join([f"{c}:{p:.4f}" for c, p in candidate_probs]))
+        # logger.info(f"[Confidence] Word: {word}, Prob: {prob:.4f}, Sum: {total:.4f}, Norm: {confidence:.4f}")
+        # logger.info(f"[Candidates Prob] " + ", ".join([f"{c}:{p:.4f}" for c, p in candidate_probs]))
 
         return confidence
 
@@ -182,7 +204,7 @@ def generate_constrained_labels(pil_imgs, labels, fout, candidate_set, processor
 # ---------- 主处理流程 ----------
 def main():
     os.makedirs(args.output_dir, exist_ok=True)
-    question = "Question: What is the object in the picture? Answer:"
+    # question = f"Question: What is the object in the picture? You can only choose one answer from [{test_dataset.classes}]. Answer:"
     # question = "Question: What instrument is in this picture? Answer:"
     # question = "Question: What is the specific species of animal in the picture? Answer:"
     # question = "Question: What color is the animal in the picture? Answer:"
@@ -197,18 +219,21 @@ def main():
     print(f"加载 {args.dataset.upper()} 数据集...")
     test_dataset = CustomDataset(dataset_name=args.dataset, transform=transform_tensor, split='test')
     data_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=custom_collate_fn)
-    
+
+    question = f"Question: What is the object in the picture? You can only choose one answer from {test_dataset.classes}. Answer:"
+    print(f"使用问题: {question}")
+
     # 设置候选集
     if args.criteria == "flying":
         candidate_set = ["flying", "non-flying"]
-    elif args.criteria == "situation":
+    elif args.criteria == "habitat":
         candidate_set = ["sky", "land", "water"]
     elif args.criteria == "living":
         candidate_set = ["organism", "manufactured"]
     elif args.criteria == "instrument":
         candidate_set = ["string", "brass"]
-    elif args.criteria == "color":
-        candidate_set = ["black", "white", "gray", "brown"]
+    elif args.criteria == "cifar20":
+        candidate_set = ["organism", "plant", "man-made", "landscape"]
     else:
         candidate_set = test_dataset.classes
 

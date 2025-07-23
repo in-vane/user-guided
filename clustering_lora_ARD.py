@@ -24,8 +24,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ---------- 参数解析 ----------
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='cifar10', choices=['mnist', 'cifar10', 'stl10', 'ppmi', 'oxford_pet'], help='选择数据集')
-parser.add_argument('--text_key', type=str, default='llm_answer', help='jsonl文件中用于聚类的文本字段名')
+parser.add_argument('--dataset', type=str, default='cifar10', choices=['mnist', 'cifar10', 'cifar100', 'stl10', 'ppmi', 'oxford_pet'], help='选择数据集')
+parser.add_argument('--text_key', type=str, default='llm_answer', choices=['llm_answer', 'vqa_answer'], help='jsonl文件中用于聚类的文本字段名')
 parser.add_argument('--k', type=int, default=10, help='类别数')
 parser.add_argument('--c', type=str, default="", help='类别映射文件路径（可选）')
 args = parser.parse_args()
@@ -89,12 +89,35 @@ transform_tensor = preprocess
 
 class DatasetWithPIL(torch.utils.data.Dataset):
     def __init__(self, dataset_name, split, transform):
-        assert dataset_name in ['mnist', 'cifar10', 'stl10', 'ppmi', 'oxford_pet']
+        assert dataset_name in ['mnist', 'cifar10', 'cifar100', 'stl10', 'ppmi', 'oxford_pet']
         self.transform = transform
         if dataset_name == 'mnist':
             self.base = datasets.MNIST(root="./data", train=(split == 'train'), download=True)
         elif dataset_name == 'cifar10':
             self.base = datasets.CIFAR10(root="./data", train=(split == 'train'), download=True)
+        elif dataset_name == 'cifar100':
+            CIFAR100_COARSE_MAPPING = [
+                4, 1, 14, 8, 0, 6, 7, 7, 18, 3,
+                3, 14, 9, 18, 7, 11, 3, 9, 7, 11,
+                6, 11, 5, 10, 7, 6, 13, 15, 3, 15,
+                0, 11, 1, 10, 12, 14, 16, 9, 11, 5,
+                5, 19, 8, 8, 15, 13, 14, 17, 18, 10,
+                16, 4, 17, 4, 2, 0, 17, 4, 18, 17,
+                10, 3, 2, 12, 12, 16, 12, 1, 9, 19,
+                2, 10, 0, 1, 16, 12, 9, 13, 15, 13,
+                16, 19, 2, 4, 6, 19, 5, 5, 8, 19,
+                18, 1, 2, 15, 6, 0, 17, 8, 14, 13
+            ]
+            self.base = datasets.CIFAR100(root="./data", train=(split == 'train'), download=True)
+            original_targets = self.base.targets
+            self.base.targets = [CIFAR100_COARSE_MAPPING[t] for t in original_targets]
+            self.classes = [
+                'aquatic mammals', 'fish', 'flowers', 'food containers', 'fruit and vegetables',
+                'household electrical devices', 'household furniture', 'insects', 'large carnivores',
+                'large man-made outdoor things', 'large natural outdoor scenes', 'large omnivores and herbivores',
+                'medium-sized mammals', 'non-insect invertebrates', 'people', 'reptiles', 
+                'small mammals', 'trees', 'vehicles 1', 'vehicles 2'
+            ]
         elif dataset_name == 'stl10':
             self.base = datasets.STL10(root="./data", split=split, download=True)
         elif dataset_name == 'ppmi':
@@ -121,6 +144,9 @@ class DatasetWithPIL(torch.utils.data.Dataset):
         elif self.dataset_name == 'cifar10':
             img, target = self.base.data[idx], int(self.base.targets[idx])
             pil_img = Image.fromarray(img).convert("RGB")
+        elif self.dataset_name == 'cifar100':
+            img, target = self.base.data[idx], int(self.base.targets[idx])
+            pil_img = Image.fromarray(img).convert("RGB")
         elif self.dataset_name == 'stl10':
             img, target = self.base.data[idx], int(self.base.labels[idx])
             pil_img = Image.fromarray(np.transpose(img, (1, 2, 0))).convert("RGB")
@@ -142,6 +168,8 @@ def custom_collate_fn(batch):
 if args.dataset == 'mnist':
     split = 'test'
 elif args.dataset == 'cifar10':
+    split = 'test'
+elif args.dataset == 'cifar100':
     split = 'test'
 elif args.dataset == 'stl10':
     split = 'test'
@@ -200,6 +228,7 @@ v_feats = torch.cat(all_v_feats, dim=0).numpy()
 t_feats = torch.cat(all_t_feats, dim=0).numpy()
 fused_feats = torch.cat(all_fused_feats, dim=0).numpy()
 true_labels = torch.cat(all_labels, dim=0).numpy()
+print(true_labels)
 
 # ---------- 聚类评估 ----------
 def cluster_accuracy(y_true, y_pred):
@@ -221,31 +250,33 @@ def evaluate_kmeans(features, labels_true, n_clusters):
 def map_to_class(y):
     # y: numpy array of original labels
     y_new = np.zeros_like(y)
-    # # vehicle
-    # y_new[np.isin(y, [0, 1, 8, 9])] = 0
-    # y_new[np.isin(y, [2, 3, 4, 5, 6, 7])] = 1
-    # # habitat: water、land、sky
-    # y_new[np.isin(y, [0, 2])] = 0
-    # y_new[np.isin(y, [8])] = 1
-    # y_new[np.isin(y, [1, 3, 4, 5, 6, 7, 9])] = 2
-    # # instrument: string brass
-    # y_new[np.isin(y, [0, 1, 2, 4])] = 0
-    # y_new[np.isin(y, [3, 5])] = 1
-    # # instrument: black white gray brown
-    # y_new[np.isin(y, [7, 17, 18, 22, 30, ])] = 0   # black
-    # y_new[np.isin(y, [1, 6, 10, 13, 15, 16, 23, 26, 29, 32, 33, 35])] = 1   # white
-    # y_new[np.isin(y, [9, 11, 20, 27, ])] = 2   # gray
-    # y_new[np.isin(y, [0, 2, 3, 4, 5, 8, 12, 14, 19, 21, 24, 25, 28, 31, 34, 36])] = 3 # brown
-    # # range: small medium large
-    # y_new[np.isin(y, [0, 1, 2, 3])] = 0   # small
-    # y_new[np.isin(y, [4, 5, 6])] = 1   # medium
-    # y_new[np.isin(y, [7, 8, 9])] = 2   # large
-    # living: living non-living
-    y_new[np.isin(y, [1, 3, 4, 5, 6, 7])] = 0   # living
-    y_new[np.isin(y, [0, 2, 8, 9])] = 1   # non-living
+    if args.c == "_habitat":
+        y_new[np.isin(y, [0, 2])] = 0 # water
+        y_new[np.isin(y, [8])] = 1 # land
+        y_new[np.isin(y, [1, 3, 4, 5, 6, 7, 9])] = 2 # sky
+    elif args.c == "_species":
+        y_new[np.isin(y, [0, 1, 7, 8, 11, 12, 13, 15, 16])] = 0 # animal
+        y_new[np.isin(y, [2, 4, 17])] = 1 # plant
+        y_new[np.isin(y, [14, ])] = 2 # human
+        y_new[np.isin(y, [3, 5, 6, 9, 10, 18, 19])] = 3 # non-living
+    elif args.c == "_instrument":
+        y_new[np.isin(y, [0, 1, 2, 4])] = 0 # string
+        y_new[np.isin(y, [3, 5])] = 1 # brass
+    elif args.c == "_range":
+        y_new[np.isin(y, [0, 1, 2, 3])] = 0   # small
+        y_new[np.isin(y, [4, 5, 6])] = 1   # medium
+        y_new[np.isin(y, [7, 8, 9])] = 2   # large
+    elif args.c == "_living":
+        y_new[np.isin(y, [1, 3, 4, 5, 6, 7])] = 0   # living
+        y_new[np.isin(y, [0, 2, 8, 9])] = 1   # non-living
+    else:
+        y_new = y
     return y_new
 
-mapped_labels = map_to_class(true_labels)
+if args.c != "_default":
+    mapped_labels = map_to_class(true_labels)
+else:
+    mapped_labels = true_labels
 num_classes = args.k
 
 acc_v, ari_v, nmi_v, preds_v = evaluate_kmeans(v_feats, mapped_labels, n_clusters=num_classes)
@@ -259,6 +290,7 @@ print("{:<25} {:.4f}     {:.4f}     {:.4f}".format("Text", acc_t, ari_t, nmi_t))
 print("{:<25} {:.4f}     {:.4f}     {:.4f}".format("Fused (V+T)", acc_f, ari_f, nmi_f))
 
 # ---------- 结果可视化 ----------
+# # 三张在一起
 # def plot_tsne_multi(features_list, preds_list, titles, num_classes):
 #     sns.set_theme(style="whitegrid", font_scale=1.2)
 #     plt.rcParams['figure.facecolor'] = 'white'
@@ -286,10 +318,41 @@ print("{:<25} {:.4f}     {:.4f}     {:.4f}".format("Fused (V+T)", acc_f, ari_f, 
 #     plt.savefig(f'tsne_predicted_clusters_ard{args.c}.pdf', bbox_inches='tight')
 #     plt.close()
 
-# # 调用新函数
 # plot_tsne_multi(
 #     [v_feats, t_feats, fused_feats],
 #     [preds_v, preds_t, preds_f],
 #     ['Vision Features', 'Text Features', 'Fused Features'],
 #     num_classes
 # )
+
+# 三张分开
+def plot_tsne_multi_separate(features_list, preds_list, titles, num_classes):
+    sns.set_theme(style="whitegrid", font_scale=1.2)
+    plt.rcParams['figure.facecolor'] = 'white'
+    for i, (features, preds, title) in enumerate(zip(features_list, preds_list, titles)):
+        plt.figure(figsize=(8, 7), dpi=120)
+        tsne = TSNE(n_components=2, random_state=42, perplexity=150, n_iter=1000)
+        features_2d = tsne.fit_transform(features)
+        palette = sns.color_palette("husl", n_colors=num_classes)
+        for cluster_id in range(num_classes):
+            mask = preds == cluster_id
+            plt.scatter(features_2d[mask, 0], features_2d[mask, 1],
+                        color=palette[cluster_id],
+                        label=f'Cluster {cluster_id}',
+                        s=15, alpha=0.3)
+        # plt.title(title, fontsize=14, pad=20)
+        plt.xlabel('t-SNE 1', fontsize=12)
+        plt.ylabel('t-SNE 2', fontsize=12)
+        # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f'tsne_{args.c}_{title}.pdf', bbox_inches='tight')
+        plt.close()
+
+# 调用新函数
+plot_tsne_multi_separate(
+    [v_feats, t_feats, fused_feats],
+    [preds_v, preds_t, preds_f],
+    ['Vision', 'Text', 'Fused'],
+    num_classes
+)

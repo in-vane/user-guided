@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 # ---------- 命令行参数 ----------
 parser = argparse.ArgumentParser(description='VQA-LLM图像分类系统 - LLM部分')
-parser.add_argument('--dataset', type=str, required=True, choices=['mnist', 'cifar10', 'stl10', 'ppmi', 'oxford_pet'])
+parser.add_argument('--dataset', type=str, required=True, choices=['mnist', 'cifar10', 'cifar100', 'stl10', 'ppmi', 'oxford_pet'])
 parser.add_argument('--k', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size for LLM processing')
 parser.add_argument('--input_dir', type=str, default='results')
 parser.add_argument('--output_dir', type=str, default='results')
-parser.add_argument('--criteria', type=str, default='default', choices=['range', 'flying', 'living', 'situation', 'instrument', 'color', 'number', 'default'])
+parser.add_argument('--criteria', type=str, default='default', choices=['range', 'flying', 'living', 'habitat', 'instrument', 'species', 'number', 'default'])
 args = parser.parse_args()
 
 # ---------- 数据集类 ----------
@@ -36,6 +36,12 @@ class CustomDataset:
         elif self.dataset_name == 'cifar10':
             return ['airplane', 'automobile', 'bird', 'cat', 'deer',
                     'dog', 'frog', 'horse', 'ship', 'truck']
+        elif self.dataset_name == 'cifar100':
+            return ['aquatic mammals', 'fish', 'flowers', 'food containers', 'fruit and vegetables',
+                    'household electrical devices', 'household furniture', 'insects', 'large carnivores',
+                    'large man-made outdoor things', 'large natural outdoor scenes', 'large omnivores and herbivores',
+                    'medium-sized mammals', 'non-insect invertebrates', 'people', 'reptiles', 
+                    'small mammals', 'trees', 'vehicles 1', 'vehicles 2']
         elif self.dataset_name == 'stl10':
             return ['airplane', 'bird', 'car', 'cat', 'deer',
                     'dog', 'horse', 'monkey', 'ship', 'truck']
@@ -63,18 +69,18 @@ def load_llm_model():
 def create_prompt(desc, criteria, candidates):
     if criteria == 'range':
         return f"You will get a list of descriptions of images from the MNIST dataset. Determine whether the number in each description falls into the range of small (0, 1, 2, 3), medium (4, 5, 6), or large (7, 8, 9).\nDescription: {desc}\nOptions: [small, medium, large]\nAnswer:"
+    elif criteria == 'number':
+        return f"You will be given a list of objects. Decide which of the following each object is more related to: '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'.\nDescription: {desc}\nOptions: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']\nAnswer:"
     elif criteria == 'flying':
         return f"Analyze whether the object can fly:\nDescription: {desc}\nOptions: [flying, non-flying]\nAnswer:"
-    elif criteria == 'situation':
+    elif criteria == 'habitat':
         return f"You will be given a list of objects. Decide which of the following each object is more related to: 'Sky', 'Land', or 'Water'.\nDescription: {desc}\nOptions: [sky, land, water]\nAnswer:"
     elif criteria == 'living':
         return f"You will be given a list of object descriptions. Determine for each object whether it is 'existing in nature or 'man-made'. For 'existing in nature', answer 'organism' and for 'man-made', answer 'manufactured'.\nDescription: {desc}\nOptions: [organism, manufactured]\nAnswer:"
     elif criteria == 'instrument':
         return f"You will be given a list of objects. Decide which of the following each object is more related to: 'string', 'brass'.\nDescription: {desc}\nOptions: [string, brass]\nAnswer:"
-    elif criteria == 'color':
-        return f"You will be given a list of objects' color. Decide which of the following each object is more related to: 'black', 'white', 'gray', 'brown'.\nDescription: {desc}\nOptions: ['black', 'white', 'gray', 'brown']\nAnswer:"
-    elif criteria == 'number':
-        return f"You will be given a list of objects. Decide which of the following each object is more related to: '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'.\nDescription: {desc}\nOptions: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']\nAnswer:"
+    elif criteria == 'species':
+        return f"You will be given a list of object descriptions. Please determine whether each object is 'animal', 'plant', 'human', or 'non-living'.\nDescription: {desc}\nOptions: ['animal', 'plant', 'human', 'non-living']\nAnswer:"
     else:
         return f"Classify the object:\nDescription: {desc}\nOptions: {', '.join(candidates)}\nAnswer:"
 
@@ -164,8 +170,8 @@ def main():
         candidate_set = ["organism", "manufactured"]
     elif args.criteria == "instrument":
         candidate_set = ["string", "brass"]
-    elif args.criteria == "color":
-        candidate_set = ["black", "white", "gray", "brown"]
+    elif args.criteria == "species":
+        candidate_set = ['animal', 'plant', 'human', 'non-living']
     elif args.criteria == "number":
         candidate_set = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
     else:
